@@ -11,7 +11,7 @@ from . import config as cfg_mod
 from . import engine, excel
 
 WEEKDAY_NAMES_FULL = ["Montag", "Dienstag", "Mittwoch", "Donnerstag", "Freitag", "Samstag", "Sonntag"]
-WEEKDAY_NAMES_SHORT = ["Mo", "Di", "Mi", "Do", "Fr"]
+WEEKDAY_NAMES_SHORT = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"]
 
 
 def _fmt_hours(value: float) -> str:
@@ -83,9 +83,6 @@ def clock_in(is_home, manual_time, manual_date):
     date = _parse_date(manual_date) if manual_date else now.date()
     stamp_time = _parse_time(manual_time) if manual_time else now.time().replace(second=0, microsecond=0)
 
-    if date.weekday() > 4:
-        raise click.ClickException("Wochenende! Keine Zeiterfassung am Samstag/Sonntag.")
-
     wb = excel.ensure_workbook(data_dir, date.year, config)
     sheet_name = excel.MONTH_NAMES[date.month - 1]
     ws = wb[sheet_name]
@@ -115,9 +112,6 @@ def clock_out(is_sick, manual_time, manual_date):
     now = datetime.datetime.now()
     date = _parse_date(manual_date) if manual_date else now.date()
     stamp_time = _parse_time(manual_time) if manual_time else now.time().replace(second=0, microsecond=0)
-
-    if date.weekday() > 4:
-        raise click.ClickException("Wochenende! Keine Zeiterfassung am Samstag/Sonntag.")
 
     wb = excel.ensure_workbook(data_dir, date.year, config)
     sheet_name = excel.MONTH_NAMES[date.month - 1]
@@ -221,19 +215,25 @@ def week_summary():
     # Find Monday of this week
     monday = today - datetime.timedelta(days=today.weekday())
 
-    click.echo(f"Woche {monday.strftime('%d.%m.')} - {(monday + datetime.timedelta(days=4)).strftime('%d.%m.%Y')}:")
+    click.echo(f"Woche {monday.strftime('%d.%m.')} - {(monday + datetime.timedelta(days=6)).strftime('%d.%m.%Y')}:")
     click.echo()
 
     week_total = 0.0
     week_soll = 0.0
 
-    for i in range(5):  # Mon-Fri
+    for i in range(7):  # Mon-Sun
         day = monday + datetime.timedelta(days=i)
         day_row = engine.get_today_status(data_dir, config, day)
+        expected_hours = cfg_mod.get_expected_hours(config, day.weekday())
 
         tag = WEEKDAY_NAMES_SHORT[i]
         date_str = day.strftime("%d.%m.")
         marker = " <--" if day == today else ""
+
+        # For days with no expected hours (e.g. weekends), only show if they have data
+        has_data = day_row and (day_row.total is not None or day_row.blocks)
+        if expected_hours == 0 and not has_data:
+            continue
 
         if day_row and day_row.total is not None:
             # Check if this day has an open stamp (today, currently clocked in)
@@ -293,7 +293,7 @@ def week_summary():
                 f"{click.style(marker, fg='cyan')}"
             )
         else:
-            soll = cfg_mod.get_expected_hours(config, day.weekday())
+            soll = expected_hours
             week_soll += soll
             if day <= today:
                 click.echo(
@@ -362,9 +362,6 @@ def manual_entry(target_date, ein_time, aus_time, is_home):
     data_dir = cfg_mod.get_data_dir(config)
 
     date = _parse_date(target_date)
-
-    if date.weekday() > 4:
-        raise click.ClickException("Wochenende! Keine Zeiterfassung am Samstag/Sonntag.")
 
     wb = excel.ensure_workbook(data_dir, date.year, config)
     sheet_name = excel.MONTH_NAMES[date.month - 1]

@@ -1,6 +1,12 @@
 # Stechuhr
 
-A command-line time clock (Stempeluhr) that tracks working hours in Excel files.
+A privacy-friendly CLI time tracker that stores everything in plain Excel files.
+
+- **Fast**: Clock in/out with a single terminal command
+- **Private**: All data stays local in Excel files - no cloud, no account
+- **Transparent**: Open and edit your timesheet in any spreadsheet app
+- **Simple**: One Python package, no database, no config servers
+- **Yours**: Plain .xlsx files you can backup, share, or archive however you want
 
 ## Features
 
@@ -17,7 +23,8 @@ A command-line time clock (Stempeluhr) that tracks working hours in Excel files.
 - **Forgotten stamp warning**: When clocking in, you get a warning if the previous workday has an unclosed entry.
 - **Color-coded output**: Positive saldo in green, negative in red.
 - **Missing days**: Days without any stamps are assumed to have been worked as expected (no overtime, no undertime). This also covers **vacation and sick days** -- if you don't stamp on a day, it counts as if you worked your expected hours (saldo = 0).
-- **Excel output**: One `.xlsx` file per year, 12 sheets (one per month), with formatted rows for each workday (Mon-Fri).
+- **Flexible schedule**: Only days with expected hours > 0 appear in the Excel. You can clock in on any day (including weekends) -- those days are added automatically and count as overtime.
+- **Excel output**: One `.xlsx` file per year, 12 sheets (one per month), with formatted rows for each day with expected hours.
 - **Manual Excel editing**: Edit times directly in the spreadsheet, then run `stempel update` to recalculate hours and balances.
 - **Shell completion**: Tab completion for bash, zsh, and fish.
 
@@ -187,7 +194,7 @@ On first run, a config file is created at `~/.config/stechuhr/config.json`:
 |-------|-------------|
 | `data_dir` | Where `.xlsx` files are stored |
 | `travel_offset_minutes` | Minutes added/subtracted for commute time (office days only) |
-| `expected_hours` | Target hours per weekday |
+| `expected_hours` | Target hours per weekday (days with 0 hours won't appear in Excel unless you clock in) |
 | `auto_break_threshold_hours` | Threshold above which break is auto-deducted |
 | `auto_break_deduction_minutes` | Maximum auto-deduction (30 min) |
 | `carry_over_balance` | Year-to-year overtime carry-over (e.g. `{"2025": 5.0}`) |

@@ -17,7 +17,7 @@ MONTH_NAMES = [
     "Jul", "Aug", "Sep", "Okt", "Nov", "Dez",
 ]
 
-WEEKDAY_NAMES = ["Mo", "Di", "Mi", "Do", "Fr"]
+WEEKDAY_NAMES = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"]
 
 # Excel number formats for H:MM display
 HOURS_FMT = "[h]:mm"
@@ -178,8 +178,10 @@ def _create_month_sheet(wb: Workbook, year: int, month: int, config: dict) -> Wo
         day_num, weekday = day
         if day_num == 0:
             continue  # day belongs to another month
-        if weekday > 4:
-            continue  # weekend
+        # Only create rows for days with expected hours > 0
+        expected = cfg_mod.get_expected_hours(config, weekday)
+        if expected <= 0:
+            continue
 
         dt = datetime.date(year, month, day_num)
         ws.cell(row, 1, value=dt.strftime("%d.%m.%Y"))
@@ -352,6 +354,74 @@ def _read_day_status(ws: Worksheet, row_num: int) -> str:
     return str(val) if val else ""
 
 
+def _insert_day_row(ws: Worksheet, date: datetime.date, config: dict) -> int:
+    """Insert a new row for a date that doesn't exist yet (e.g. weekends).
+
+    Returns the row number of the newly inserted row.
+    """
+    thin_border = Border(
+        left=Side(style="thin"),
+        right=Side(style="thin"),
+        top=Side(style="thin"),
+        bottom=Side(style="thin"),
+    )
+
+    # Find the correct position to insert (maintain date order)
+    insert_row = None
+    for row in range(HEADER_ROW + 1, ws.max_row + 1):
+        date_val = ws.cell(row, 1).value
+        if date_val is None:
+            continue
+        # Stop at summary rows
+        if isinstance(date_val, str) and date_val in ("Summe", "Uebertrag", "Kumuliert"):
+            insert_row = row
+            break
+        # Parse existing date
+        if isinstance(date_val, str):
+            try:
+                dt = datetime.datetime.strptime(date_val, "%d.%m.%Y").date()
+                if dt > date:
+                    insert_row = row
+                    break
+            except ValueError:
+                continue
+
+    if insert_row is None:
+        # Shouldn't happen, but fallback to after last data row
+        insert_row = ws.max_row + 1
+
+    # Insert new row
+    ws.insert_rows(insert_row)
+
+    # Set up the row
+    num_blocks = _count_blocks(ws)
+    status_col, gesamt_col, soll_col, saldo_col = _find_summary_cols(ws)
+
+    # Date column
+    ws.cell(insert_row, 1, value=date.strftime("%d.%m.%Y"))
+    ws.cell(insert_row, 1).alignment = Alignment(horizontal="center")
+    ws.cell(insert_row, 1).border = thin_border
+
+    # Weekday column
+    ws.cell(insert_row, 2, value=WEEKDAY_NAMES[date.weekday()])
+    ws.cell(insert_row, 2).alignment = Alignment(horizontal="center")
+    ws.cell(insert_row, 2).border = thin_border
+
+    # Expected hours (Soll) - 0 for days without expected hours
+    expected = cfg_mod.get_expected_hours(config, date.weekday())
+    ws.cell(insert_row, soll_col, value=_hours_to_fraction(expected))
+    ws.cell(insert_row, soll_col).number_format = HOURS_FMT
+    ws.cell(insert_row, soll_col).alignment = Alignment(horizontal="center")
+    ws.cell(insert_row, soll_col).border = thin_border
+
+    # Apply borders to all cells
+    for col_idx in range(3, saldo_col + 1):
+        ws.cell(insert_row, col_idx).border = thin_border
+        ws.cell(insert_row, col_idx).alignment = Alignment(horizontal="center")
+
+    return insert_row
+
+
 def write_stamp(ws: Worksheet, date: datetime.date, stamp_time: datetime.time,
                 stamp_type: str, is_home: bool, config: dict) -> None:
     """Write a clock-in or clock-out stamp to the correct cell.
@@ -361,7 +431,8 @@ def write_stamp(ws: Worksheet, date: datetime.date, stamp_time: datetime.time,
     """
     row_num = find_day_row(ws, date)
     if row_num is None:
-        raise ValueError(f"Kein Eintrag fuer {date.strftime('%d.%m.%Y')} im Arbeitsblatt gefunden.")
+        # Day doesn't have a row yet (e.g. weekend) - create it
+        row_num = _insert_day_row(ws, date, config)
 
     num_blocks = _count_blocks(ws)
 
