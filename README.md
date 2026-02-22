@@ -18,6 +18,7 @@ A command-line time clock (Stempeluhr) that tracks working hours in Excel files.
 - **Color-coded output**: Positive saldo in green, negative in red.
 - **Missing days**: Days without any stamps are assumed to have been worked as expected (no overtime, no undertime). This also covers **vacation and sick days** -- if you don't stamp on a day, it counts as if you worked your expected hours (saldo = 0).
 - **Excel output**: One `.xlsx` file per year, 12 sheets (one per month), with formatted rows for each workday (Mon-Fri).
+- **Manual Excel editing**: Edit times directly in the spreadsheet, then run `stempel update` to recalculate hours and balances.
 - **Shell completion**: Tab completion for bash, zsh, and fish.
 
 ## Installation
@@ -144,7 +145,7 @@ Woche 16.02. - 20.02.2026:
   Do 19.02.  (noch offen)
   Fr 20.02.  (noch offen)
 
-  Woche:     Gesamt: 11:30  Soll: 28:00  Saldo: -16:30
+  Woche:     Gesamt: 21:30  Soll: 40:00  Saldo: -18:30
 ```
 
 The `~` prefix indicates a live estimate that includes time since the last clock-in.
