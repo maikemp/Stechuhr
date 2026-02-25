@@ -504,6 +504,23 @@ def _expand_blocks(ws: Worksheet, new_block_num: int) -> None:
         cell.alignment = Alignment(horizontal="center")
 
 
+def _actual_break_minutes(blocks: list, date: datetime.date) -> float:
+    """Calculate total break minutes from gaps between consecutive completed blocks."""
+    # Collect (aus, next_ein) pairs from consecutive completed blocks
+    completed = [(ein, aus) for _, ein, aus in blocks if ein is not None and aus is not None]
+    if len(completed) < 2:
+        return 0.0
+
+    total = 0.0
+    for i in range(len(completed) - 1):
+        prev_aus = datetime.datetime.combine(date, completed[i][1])
+        next_ein = datetime.datetime.combine(date, completed[i + 1][0])
+        gap = (next_ein - prev_aus).total_seconds() / 60.0
+        if gap > 0:
+            total += gap
+    return total
+
+
 def recalculate_day(ws: Worksheet, date: datetime.date, config: dict) -> None:
     """Recalculate Stunden, Gesamt, Saldo for a day row.
 
@@ -576,11 +593,16 @@ def recalculate_day(ws: Worksheet, date: datetime.date, config: dict) -> None:
 
         total_work += hours
 
-    # Apply auto break deduction
-    if total_work > threshold + (deduction_min / 60.0):
-        total_work -= deduction_min / 60.0
-    elif total_work > threshold:
-        total_work = threshold
+    # Apply auto break deduction.
+    # Legal requirement: at least 30 min break after 6h of work.
+    # Calculate actual break time from gaps between completed blocks,
+    # then only deduct the shortfall (if any).
+    if total_work > threshold:
+        actual_break_minutes = _actual_break_minutes(blocks, date)
+        shortfall = max(0.0, deduction_min - actual_break_minutes)
+        if shortfall > 0:
+            shortfall_hours = shortfall / 60.0
+            total_work = max(threshold, total_work - shortfall_hours)
 
     _, gesamt_col, soll_col, saldo_col = _find_summary_cols(ws)
 
@@ -851,11 +873,13 @@ def calculate_current_hours(ws: Worksheet, date: datetime.date, config: dict) ->
             diff = 0.0
         total_work += diff
 
-    # Apply auto break deduction
-    if total_work > threshold + (deduction_min / 60.0):
-        total_work -= deduction_min / 60.0
-    elif total_work > threshold:
-        total_work = threshold
+    # Apply auto break deduction (same logic as recalculate_day).
+    if total_work > threshold:
+        actual_break_minutes = _actual_break_minutes(blocks, date)
+        shortfall = max(0.0, deduction_min - actual_break_minutes)
+        if shortfall > 0:
+            shortfall_hours = shortfall / 60.0
+            total_work = max(threshold, total_work - shortfall_hours)
 
     return round(total_work, 2)
 
