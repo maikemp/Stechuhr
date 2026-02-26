@@ -404,6 +404,9 @@ def update(target_date, target_month):
         wb = excel.ensure_workbook(data_dir, date.year, config)
         ws = wb[excel.MONTH_NAMES[date.month - 1]]
         excel.recalculate_day(ws, date, config)
+        excel.migrate_saldo_format(ws)
+        carry = cfg_mod.get_carry_over(config, date.year)
+        excel.recalculate_sheet_summary(ws, date.year, date.month, carry, config)
         excel.save_workbook(wb, data_dir, date.year)
         click.echo(f"Neuberechnung fuer {date.strftime('%d.%m.%Y')} abgeschlossen.")
 
@@ -442,6 +445,9 @@ def update(target_date, target_month):
                 excel.recalculate_day(ws, dt, config)
                 count += 1
 
+        excel.migrate_saldo_format(ws)
+        carry = cfg_mod.get_carry_over(config, year)
+        excel.recalculate_sheet_summary(ws, year, month, carry, config)
         excel.save_workbook(wb, data_dir, year)
         click.echo(f"Neuberechnung fuer {sheet_name} {year}: {count} Tage aktualisiert.")
 
@@ -449,6 +455,7 @@ def update(target_date, target_month):
         year = datetime.date.today().year
         wb = excel.ensure_workbook(data_dir, year, config)
         total_count = 0
+        carry = cfg_mod.get_carry_over(config, year)
 
         for month in range(1, 13):
             sheet_name = excel.MONTH_NAMES[month - 1]
@@ -478,6 +485,9 @@ def update(target_date, target_month):
                 if has_stamps:
                     excel.recalculate_day(ws, dt, config)
                     total_count += 1
+
+            excel.migrate_saldo_format(ws)
+            carry = excel.recalculate_sheet_summary(ws, year, month, carry, config)
 
         excel.save_workbook(wb, data_dir, year)
         click.echo(f"Neuberechnung fuer {year}: {total_count} Tage aktualisiert.")

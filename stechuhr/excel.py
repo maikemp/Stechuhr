@@ -21,7 +21,7 @@ WEEKDAY_NAMES = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"]
 
 # Excel number formats for H:MM display
 HOURS_FMT = "[h]:mm"
-SALDO_FMT = '[h]:mm;\\-[h]:mm;"0:00"'
+SALDO_FMT = '0'
 
 # Column layout constants
 # A=Datum, B=Tag, then blocks of 3 (Ein, Aus, Stunden), then Status, Gesamt, Soll, Saldo
@@ -58,6 +58,21 @@ def _hours_to_fraction(hours: float) -> float:
 def _fraction_to_hours(fraction: float) -> float:
     """Convert Excel time fraction back to decimal hours."""
     return fraction * 24.0
+
+
+def _read_saldo_minutes(val) -> float:
+    """Read a saldo cell value and return minutes.
+
+    Handles both the new format (plain integer minutes) and
+    legacy format (time fractions read as timedelta by openpyxl).
+    """
+    if val is None:
+        return 0.0
+    if isinstance(val, datetime.timedelta):
+        # Legacy: cell has [h]:mm format, openpyxl returns timedelta.
+        # timedelta.total_seconds() = fraction * 86400 = hours * 3600
+        return round(val.total_seconds() / 60.0)
+    return float(val)
 
 
 def _read_hours_value(val) -> float:
@@ -314,7 +329,7 @@ def read_day_row(ws: Worksheet, date: datetime.date, config: dict) -> Optional[D
         status=str(status_val),
         total=_read_hours_value(total_val) if total_val is not None else None,
         expected=_read_hours_value(soll_val) if soll_val is not None else 0.0,
-        balance=_read_hours_value(saldo_val) if saldo_val is not None else None,
+        balance=_read_saldo_minutes(saldo_val) / 60.0 if saldo_val is not None else None,
         row_num=row_num,
     )
 
@@ -618,8 +633,8 @@ def recalculate_day(ws: Worksheet, date: datetime.date, config: dict) -> None:
     else:
         expected = _read_hours_value(soll_raw)
 
-    saldo = round(total_work - expected, 2)
-    ws.cell(row_num, saldo_col, value=_hours_to_fraction(saldo))
+    saldo_hours = round(total_work - expected, 2)
+    ws.cell(row_num, saldo_col, value=round(saldo_hours * 60))
     ws.cell(row_num, saldo_col).number_format = SALDO_FMT
     ws.cell(row_num, saldo_col).alignment = Alignment(horizontal="center")
 
@@ -645,10 +660,10 @@ def recalculate_sheet_summary(ws: Worksheet, year: int, month: int,
     if sum_row is None:
         return carry_over
 
-    # Sum over data rows (values are stored as time fractions, read as timedelta)
+    # Sum over data rows
     total_gesamt = 0.0
     total_soll = 0.0
-    total_saldo = 0.0
+    total_saldo_min = 0.0
     for row in range(HEADER_ROW + 1, sum_row):
         # Skip blank separator rows
         if ws.cell(row, 1).value is None:
@@ -661,26 +676,38 @@ def recalculate_sheet_summary(ws: Worksheet, year: int, month: int,
         if s is not None:
             total_soll += _read_hours_value(s)
         if b is not None:
-            total_saldo += _read_hours_value(b)
+            total_saldo_min += _read_saldo_minutes(b)
 
-    # totals are now in decimal hours (via _read_hours_value), convert back to fractions
+    # Gesamt and Soll are in decimal hours, convert back to fractions
     ws.cell(sum_row, gesamt_col, value=_hours_to_fraction(round(total_gesamt, 2)))
     ws.cell(sum_row, gesamt_col).number_format = HOURS_FMT
     ws.cell(sum_row, soll_col, value=_hours_to_fraction(round(total_soll, 2)))
     ws.cell(sum_row, soll_col).number_format = HOURS_FMT
-    ws.cell(sum_row, saldo_col, value=_hours_to_fraction(round(total_saldo, 2)))
+    # Saldo is in minutes
+    ws.cell(sum_row, saldo_col, value=round(total_saldo_min))
     ws.cell(sum_row, saldo_col).number_format = SALDO_FMT
 
+    carry_over_min = round(carry_over * 60)
     if carry_row:
-        ws.cell(carry_row, saldo_col, value=_hours_to_fraction(round(carry_over, 2)))
+        ws.cell(carry_row, saldo_col, value=carry_over_min)
         ws.cell(carry_row, saldo_col).number_format = SALDO_FMT
 
-    cumulative = round(carry_over + total_saldo, 2)
+    cumulative_min = carry_over_min + round(total_saldo_min)
     if cum_row:
-        ws.cell(cum_row, saldo_col, value=_hours_to_fraction(cumulative))
+        ws.cell(cum_row, saldo_col, value=cumulative_min)
         ws.cell(cum_row, saldo_col).number_format = SALDO_FMT
 
-    return cumulative
+    return round(cumulative_min / 60.0, 2)
+
+
+def migrate_saldo_format(ws: Worksheet) -> None:
+    """Migrate all saldo cells from time-fraction format to minutes format."""
+    _, _, _, saldo_col = _find_summary_cols(ws)
+    for row in range(HEADER_ROW + 1, ws.max_row + 1):
+        cell = ws.cell(row, saldo_col)
+        if cell.value is not None and cell.number_format != SALDO_FMT:
+            cell.value = round(_read_saldo_minutes(cell.value))
+            cell.number_format = SALDO_FMT
 
 
 def fill_missing_days(ws: Worksheet, config: dict, up_to_date: datetime.date) -> None:
@@ -765,7 +792,7 @@ def iter_day_rows_with_data(ws: Worksheet) -> List[Tuple[datetime.date, Optional
 
         total_f = _read_hours_value(total) if total is not None else None
         expected_f = _read_hours_value(expected) if expected is not None else 0.0
-        saldo_f = _read_hours_value(saldo) if saldo is not None else None
+        saldo_f = _read_saldo_minutes(saldo) / 60.0 if saldo is not None else None
 
         results.append((dt, total_f, expected_f, saldo_f))
 
